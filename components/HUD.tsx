@@ -1,5 +1,5 @@
 import React from 'react';
-import { GameState, Side, UnitType } from '../types';
+import { GameState, Side, UnitType, GameConfig, CardTemplate, SkillTemplate } from '../types';
 import { Pause, Play, Crown, Skull } from 'lucide-react';
 import { ConfigPanel } from './ConfigPanel';
 
@@ -8,8 +8,10 @@ interface HUDProps {
   onPause: () => void;
   onToggleSpeed: () => void;
   onCaptainSkill: () => void;
-  onUpdateConfig: (newConfig: any, newTemplates: any) => void;
-  currentConfig: any;
+  onUpdateConfig: (newConfig: GameConfig, newTemplates: Record<string, CardTemplate>, newSkills: Record<number, SkillTemplate>) => void;
+  currentConfig: GameConfig;
+  currentTemplates: Record<string, CardTemplate>;
+  currentSkills: Record<number, SkillTemplate>;
 }
 
 const CaptainInfo = ({ unit, isRight, onSkill }: { unit?: any, isRight?: boolean, onSkill?: () => void }) => {
@@ -58,7 +60,10 @@ const CaptainInfo = ({ unit, isRight, onSkill }: { unit?: any, isRight?: boolean
   );
 };
 
-export const HUD: React.FC<HUDProps> = ({ gameState, onPause, onToggleSpeed, onCaptainSkill, onUpdateConfig, currentConfig }) => {
+export const HUD: React.FC<HUDProps> = ({ 
+    gameState, onPause, onToggleSpeed, onCaptainSkill, 
+    onUpdateConfig, currentConfig, currentTemplates, currentSkills 
+}) => {
   const playerCaptain = gameState.units.find(u => u.type === UnitType.CAPTAIN && u.side === Side.PLAYER);
   const enemyCaptain = gameState.units.find(u => u.type === UnitType.CAPTAIN && u.side === Side.ENEMY);
 
@@ -79,7 +84,12 @@ export const HUD: React.FC<HUDProps> = ({ gameState, onPause, onToggleSpeed, onC
          
          {/* Controls */}
          <div className="flex gap-2 mt-2">
-            <ConfigPanel onUpdateConfig={onUpdateConfig} currentConfig={currentConfig} />
+            <ConfigPanel 
+                onUpdateConfig={onUpdateConfig} 
+                currentConfig={currentConfig} 
+                currentTemplates={currentTemplates}
+                currentSkills={currentSkills}
+            />
             <button onClick={onToggleSpeed} className="w-10 h-10 flex items-center justify-center bg-gray-800/80 text-white rounded-full hover:bg-gray-700 border border-gray-600 shadow-lg backdrop-blur">
                {gameState.timeScale > 1.5 ? <span className="font-bold text-yellow-400 text-xs">2x</span> : <span className="font-bold text-xs">1x</span>}
             </button>

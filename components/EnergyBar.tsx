@@ -1,7 +1,6 @@
 import React from 'react';
-import { GAME_CONFIG } from '../constants';
 
-export const EnergyBar = ({ current }: { current: number }) => {
+export const EnergyBar = ({ current, max }: { current: number; max: number }) => {
   const filled = Math.floor(current);
   
   // Color stages
@@ -18,7 +17,7 @@ export const EnergyBar = ({ current }: { current: number }) => {
          {/* Gloss effect */}
          <div className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent pointer-events-none"></div>
          
-        {Array.from({ length: GAME_CONFIG.MAX_ENERGY }).map((_, i) => (
+        {Array.from({ length: max }).map((_, i) => (
           <div 
             key={i} 
             className={`flex-1 h-full rounded-[1px] transition-all duration-200 ${i < filled ? getColor(i) : 'bg-white/5'}`}

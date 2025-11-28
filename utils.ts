@@ -59,22 +59,22 @@ export const getTarget = (attacker: Unit, allUnits: Unit[]): Unit | null => {
   return enemies[0]; // Fallback
 };
 
-export const calculateDamage = (attacker: Unit, defender: Unit, config: any, skillMulti: number = 1.0) => {
+export const calculateDamage = (attacker: Unit, defender: Unit, effectsConfig: Record<string, number>, skillMulti: number = 1.0) => {
   // Base Damage: Atk - Def (Minimum 5% of Atk)
   const baseDmg = Math.max(attacker.stats.atk - defender.stats.def, attacker.stats.atk * 0.05);
   let damage = baseDmg * skillMulti;
 
   // Critical Hit
   let isCrit = false;
-  if (Math.random() < config.CRIT_CHANCE) {
-    damage *= config.CRIT_MULTIPLIER;
+  if (Math.random() < (effectsConfig['CRIT_CHANCE'] || 0.2)) {
+    damage *= (effectsConfig['CRIT_MULTIPLIER'] || 1.5);
     isCrit = true;
   }
   
-  // Block (Tank only)
+  // Block (Tank only - logic could be moved to config but kept simple here)
   let isBlock = false;
-  if (!isCrit && defender.type === 'TANK' && Math.random() < config.BLOCK_CHANCE) {
-    damage *= config.BLOCK_MULTIPLIER;
+  if (!isCrit && defender.type === 'TANK' && Math.random() < (effectsConfig['BLOCK_CHANCE'] || 0.3)) {
+    damage *= (effectsConfig['BLOCK_MULTIPLIER'] || 0.7);
     isBlock = true;
   }
 

@@ -15,21 +15,49 @@ export enum Side {
   ENEMY = 'ENEMY',
 }
 
+export enum TargetType {
+  SELF = 'SELF',
+  SINGLE_ENEMY = 'SINGLE_ENEMY',
+  ALL_ENEMIES = 'ALL_ENEMIES',
+  ALL_ALLIES = 'ALL_ALLIES',
+  LOWEST_HP_ALLY = 'LOWEST_HP_ALLY',
+  LOWEST_HP_ENEMY = 'LOWEST_HP_ENEMY',
+  RANDOM_3_ENEMIES = 'RANDOM_3_ENEMIES',
+  FRONT_3_STRIKES = 'FRONT_3_STRIKES', // Berserker style
+}
+
+export enum SkillEffectType {
+  DAMAGE = 'DAMAGE',
+  HEAL = 'HEAL',
+  SHIELD = 'SHIELD',
+  TAUNT_AND_SHIELD = 'TAUNT_AND_SHIELD',
+}
+
 export type GridId = number; 
 
 export interface Stats {
   hp: number;
   maxHp: number;
-  shield: number; // Added shield
+  shield: number;
   atk: number;
   def: number;
   rage: number;
   maxRage: number;
 }
 
+export interface SkillTemplate {
+  id: number;
+  name: string;
+  description: string;
+  targetType: TargetType;
+  effectType: SkillEffectType;
+  multiplier: number; // Damage/Heal multiplier or Shield ratio
+  extraValue?: number; // Fixed values if needed
+}
+
 export interface Unit {
-  id: string;
-  templateId: string;
+  id: string; // Instance ID (UUID)
+  templateId: string; // "101", "102" etc.
   type: UnitType;
   side: Side;
   gridId: GridId;
@@ -37,15 +65,16 @@ export interface Unit {
   nextAttackTime: number;
   isDead: boolean;
   removeAt?: number;
+  skillId?: number; // Runtime link to skill
   
   // Status Effects
-  tauntUntil?: number; // Timestamp until taunt expires
+  tauntUntil?: number;
   
   fx?: {
     isHit?: boolean;
     isHealing?: boolean;
     isAttacking?: boolean;
-    isSkill?: boolean; // Casting skill visual
+    isSkill?: boolean;
     floatingText?: FloatingTextInstance[];
   };
   name: string;
@@ -60,22 +89,21 @@ export interface FloatingTextInstance {
 
 export interface CombatLogEntry {
   id: string;
-  time: string; // Formatted 2:54
+  time: string;
   message: string;
   type: 'DAMAGE' | 'HEAL' | 'DEATH' | 'SKILL' | 'SYSTEM';
   side: Side;
 }
 
 export interface CardTemplate {
-  id: string;
+  id: string; // "101"
   name: string;
   type: UnitType;
   cost: number;
   hp: number;
   atk: number;
   def: number;
-  description: string;
-  skillDescription: string;
+  skillId: number; // Link to Skill Table
   color: string;
   icon: string;
 }
@@ -84,6 +112,12 @@ export interface CardInstance {
   instanceId: string;
   templateId: string;
   isCoolingDown: boolean;
+}
+
+export interface GameConfig {
+  global: Record<string, number>; // INITIAL_ENERGY etc.
+  effects: Record<string, number>; // CRIT_CHANCE etc.
+  captains: Record<number, { hp: number, atk: number, def: number, rageRegen: number, skillId: number, name: string }>; // 0: Player, 1: Enemy
 }
 
 export interface GameState {

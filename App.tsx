@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameState, Side, Unit, UnitType, CardInstance, GridId, CombatLogEntry, CardTemplate } from './types';
-import { GAME_CONFIG as DEFAULT_GAME_CONFIG, INITIAL_DECK, CARD_TEMPLATES as DEFAULT_TEMPLATES, CAPTAIN_PLAYER_TEMPLATE, CAPTAIN_ENEMY_TEMPLATE } from './constants';
+import { GameState, Side, Unit, UnitType, CardInstance, GridId, CombatLogEntry, CardTemplate, SkillTemplate, TargetType, SkillEffectType, GameConfig } from './types';
+import { DEFAULT_CONFIG, INITIAL_DECK, DEFAULT_TEMPLATES, DEFAULT_SKILLS } from './constants';
 import { calculateDamage, getTarget } from './utils';
 import Battlefield from './components/Battlefield';
 import Hand from './components/Hand';
@@ -10,7 +10,6 @@ import { CombatLog } from './components/CombatLog';
 
 const uuid = () => Math.random().toString(36).substr(2, 9);
 
-// Helper to format time 180 -> 3:00
 const formatTime = (seconds: number) => {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -18,16 +17,16 @@ const formatTime = (seconds: number) => {
 };
 
 export default function App() {
-  const [gameConfig, setGameConfig] = useState(DEFAULT_GAME_CONFIG);
-  const [cardTemplates, setCardTemplates] = useState(DEFAULT_TEMPLATES);
+  const [gameConfig, setGameConfig] = useState<GameConfig>(DEFAULT_CONFIG);
+  const [cardTemplates, setCardTemplates] = useState<Record<string, CardTemplate>>(DEFAULT_TEMPLATES);
+  const [skillsConfig, setSkillsConfig] = useState<Record<number, SkillTemplate>>(DEFAULT_SKILLS);
   
-  // Need to update initial state based on current config
   const getInitialState = (): GameState => ({
-    timeRemaining: gameConfig.GAME_DURATION_SECONDS,
-    energy: gameConfig.INITIAL_ENERGY,
-    maxEnergy: gameConfig.MAX_ENERGY,
+    timeRemaining: gameConfig.global.GAME_DURATION_SECONDS,
+    energy: gameConfig.global.INITIAL_ENERGY,
+    maxEnergy: gameConfig.global.MAX_ENERGY,
     isPaused: false,
-    timeScale: gameConfig.BASE_GAME_SPEED,
+    timeScale: gameConfig.global.BASE_GAME_SPEED,
     winner: null,
     units: [],
     hand: Array(4).fill(null),
@@ -43,22 +42,16 @@ export default function App() {
   const dragRef = useRef<{ cardId: string | null; templateId: string | null }>({ cardId: null, templateId: null });
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
 
-  // Update Config Handler
-  const handleConfigUpdate = (newConfig: any, newTemplates: any) => {
+  const handleConfigUpdate = (newConfig: GameConfig, newTemplates: Record<string, CardTemplate>, newSkills: Record<number, SkillTemplate>) => {
       setGameConfig(newConfig);
       setCardTemplates(newTemplates);
-      // We don't reset the game immediately, users should manually restart
+      setSkillsConfig(newSkills);
   };
 
   const gameTick = useCallback((timestamp: number) => {
     if (!lastTimeRef.current) lastTimeRef.current = timestamp;
-    
-    // Calculate raw delta time
     let deltaMs = timestamp - lastTimeRef.current;
-    
-    // Clamp delta time to avoid huge jumps
     if (deltaMs > 60) deltaMs = 60; 
-    
     lastTimeRef.current = timestamp;
 
     setGameState(prev => {
@@ -66,14 +59,11 @@ export default function App() {
       
       const scale = prev.draggingCardId ? 0.05 : prev.timeScale;
       const dt = (deltaMs / 1000) * scale;
-      
       if (dt <= 0) return prev;
 
       let newState = { ...prev };
-
-      // 1. Global Resources
       newState.timeRemaining = Math.max(0, newState.timeRemaining - dt);
-      newState.energy = Math.min(newState.maxEnergy, newState.energy + (gameConfig.ENERGY_REGEN_PER_SEC * dt));
+      newState.energy = Math.min(newState.maxEnergy, newState.energy + (gameConfig.global.ENERGY_REGEN_PER_SEC * dt));
       
       if (newState.timeRemaining <= 0) {
          newState.winner = Side.ENEMY;
@@ -87,7 +77,6 @@ export default function App() {
           frameLogs.push({ id: uuid(), time: timeStr, type, side, message });
       };
 
-      // 2. Unit Logic - CLONE AND MUTATE
       let activeUnits: Unit[] = prev.units.map(u => ({
           ...u, 
           stats: { ...u.stats }, 
@@ -97,7 +86,6 @@ export default function App() {
           }
       }));
 
-      // Reset transient FX
       activeUnits.forEach(unit => {
           if (!unit.isDead) {
               unit.fx!.isAttacking = false;
@@ -108,12 +96,11 @@ export default function App() {
           }
       });
 
-      // Process Actions
       activeUnits.forEach(unit => {
         if (unit.isDead) return;
 
-        // --- Skill Logic ---
-        const canCastSkill = unit.stats.rage >= gameConfig.MAX_RAGE;
+        const maxRage = gameConfig.global.MAX_RAGE;
+        const canCastSkill = unit.stats.rage >= maxRage;
         const isAutoCast = unit.type !== UnitType.CAPTAIN || unit.side === Side.ENEMY;
         
         if (canCastSkill && isAutoCast) {
@@ -121,62 +108,52 @@ export default function App() {
              unit.fx!.isSkill = true;
              unit.fx!.floatingText!.push({ id: uuid(), text: "MAX!!", type: 'TEXT', createdAt: now });
              
-             addLog('SKILL', unit.side, `${unit.name} 释放了技能！`);
              performSkill(unit, activeUnits, now, newState, addLog);
         } 
         else {
-             // --- Normal Attack Logic ---
              unit.nextAttackTime -= dt;
              
              if (unit.nextAttackTime <= 0) {
                  if (unit.type === UnitType.HEALER) {
-                     // Heal logic
                      const allies = activeUnits.filter(a => a.side === unit.side && !a.isDead);
                      const lowestAlly = allies.sort((a,b) => (a.stats.hp/a.stats.maxHp) - (b.stats.hp/b.stats.maxHp))[0];
                      if (lowestAlly) {
-                         unit.nextAttackTime = gameConfig.ATTACK_COOLDOWN_MS / 1000;
+                         unit.nextAttackTime = gameConfig.global.ATTACK_COOLDOWN_MS / 1000;
                          unit.fx!.isHealing = true;
                          const healAmount = Math.floor(unit.stats.atk * 1.5);
                          applyHeal(unit, lowestAlly, healAmount, now, addLog);
-                         unit.stats.rage = Math.min(gameConfig.MAX_RAGE, unit.stats.rage + 150); 
+                         unit.stats.rage = Math.min(maxRage, unit.stats.rage + 150); 
                      }
                  } else {
-                     // Damage Dealer
                      const target = getTarget(unit, activeUnits);
                      if (target) {
                         const mutableTarget = activeUnits.find(u => u.id === target.id);
                         if (mutableTarget) {
-                            unit.nextAttackTime = gameConfig.ATTACK_COOLDOWN_MS / 1000;
+                            unit.nextAttackTime = gameConfig.global.ATTACK_COOLDOWN_MS / 1000;
                             unit.fx!.isAttacking = true;
                             applyDamage(unit, mutableTarget, 1.0, now, newState, addLog);
-                            unit.stats.rage = Math.min(gameConfig.MAX_RAGE, unit.stats.rage + 250);
+                            unit.stats.rage = Math.min(maxRage, unit.stats.rage + 250);
                         }
                      }
                  }
              }
         }
         
-        // Passive Rage Regen
         if (unit.type === UnitType.CAPTAIN) {
-            const regen = unit.side === Side.PLAYER 
-                ? gameConfig.PLAYER_CAPTAIN.RAGE_REGEN_PER_SEC 
-                : gameConfig.ENEMY_CAPTAIN.RAGE_REGEN_PER_SEC;
-            unit.stats.rage = Math.min(gameConfig.MAX_RAGE, unit.stats.rage + (regen * dt)); 
+            const capConfig = gameConfig.captains[unit.side === Side.PLAYER ? 0 : 1];
+            unit.stats.rage = Math.min(maxRage, unit.stats.rage + (capConfig.rageRegen * dt)); 
         }
       });
 
       newState.units = activeUnits.filter(u => !u.removeAt || now < u.removeAt);
       
-      // Append logs (optimization: only if logs exist)
       if (frameLogs.length > 0) {
           newState.combatLog = [...prev.combatLog, ...frameLogs];
-          // Keep last 200 logs to prevent memory issues
           if (newState.combatLog.length > 200) {
               newState.combatLog = newState.combatLog.slice(newState.combatLog.length - 200);
           }
       }
 
-      // 3. Hand Refill
       const newHand = [...newState.hand];
       let handChanged = false;
       for (let i = 0; i < 4; i++) {
@@ -195,9 +172,9 @@ export default function App() {
     });
 
     animationFrameRef.current = requestAnimationFrame(gameTick);
-  }, [gameConfig, cardTemplates]); // Re-create tick if config changes (though ref logic handles curr values usually, depend array ensures safety)
+  }, [gameConfig, cardTemplates, skillsConfig]);
 
-  // --- Helper Functions ---
+  // --- Generic Skill Logic ---
 
   const performSkill = (
       caster: Unit, 
@@ -206,65 +183,86 @@ export default function App() {
       stateRef: {winner: Side | null},
       addLog: (type: CombatLogEntry['type'], side: Side, msg: string) => void
   ) => {
+      const skillId = caster.skillId;
+      if (!skillId) return;
+
+      const skill = skillsConfig[skillId];
+      if (!skill) return; // No skill def found
+
+      addLog('SKILL', caster.side, `${caster.name} 使用了【${skill.name}】！`);
+
       const enemies = allUnits.filter(u => u.side !== caster.side && !u.isDead);
       const allies = allUnits.filter(u => u.side === caster.side && !u.isDead);
 
-      // Use dynamic config here
-      switch(caster.type) {
-          case UnitType.TANK:
-              caster.tauntUntil = now + gameConfig.TAUNT_DURATION_MS; 
-              caster.stats.shield += caster.stats.maxHp * gameConfig.SHIELD_ABSORB_RATIO;
-              caster.fx!.floatingText!.push({id: uuid(), text: "嘲讽", type: 'TEXT', createdAt: now});
-              addLog('SKILL', caster.side, `${caster.name} 开启嘲讽并获得护盾`);
+      // 1. Identify Targets
+      let targets: Unit[] = [];
+      
+      switch(skill.targetType) {
+          case TargetType.SELF:
+              targets = [caster];
               break;
-          case UnitType.PALADIN:
-              allies.forEach(ally => {
-                  ally.stats.shield += caster.stats.atk * 3;
-                  ally.fx!.floatingText!.push({id: uuid(), text: "护盾", type: 'BLOCK', createdAt: now});
-              });
-              addLog('SKILL', caster.side, `${caster.name} 为全体队友提供护盾`);
+          case TargetType.SINGLE_ENEMY:
+              const t = getTarget(caster, allUnits);
+              if (t) {
+                  const mt = allUnits.find(u => u.id === t.id);
+                  if (mt) targets = [mt];
+              }
               break;
-          case UnitType.HEALER:
-              addLog('SKILL', caster.side, `${caster.name} 治疗全体队友`);
-              allies.forEach(ally => applyHeal(caster, ally, caster.stats.atk * 3.5, now, addLog));
+          case TargetType.ALL_ENEMIES:
+              targets = enemies;
               break;
-          case UnitType.MAGE:
-              addLog('SKILL', caster.side, `${caster.name} 对全体敌人造成伤害`);
-              enemies.forEach(e => applyDamage(caster, e, 2.0, now, stateRef, addLog)); 
+          case TargetType.ALL_ALLIES:
+              targets = allies;
               break;
-          case UnitType.ARCHER:
-              addLog('SKILL', caster.side, `${caster.name} 对随机3个敌人乱射`);
-              for (let i = 0; i < 3; i++) {
-                  if (enemies.length > 0) {
-                      const rndTarget = enemies[Math.floor(Math.random() * enemies.length)];
-                      applyDamage(caster, rndTarget, 1.8, now, stateRef, addLog);
+          case TargetType.LOWEST_HP_ALLY:
+              targets = allies.sort((a,b) => (a.stats.hp/a.stats.maxHp) - (b.stats.hp/b.stats.maxHp)).slice(0, 1);
+              break;
+          case TargetType.LOWEST_HP_ENEMY:
+              targets = enemies.sort((a,b) => a.stats.hp - b.stats.hp).slice(0, 1);
+              break;
+          case TargetType.RANDOM_3_ENEMIES:
+              const shuffled = [...enemies].sort(() => 0.5 - Math.random());
+              targets = shuffled.slice(0, 3);
+              break;
+          case TargetType.FRONT_3_STRIKES:
+               // Berserker style: multiple hits on same target usually
+               const ft = getTarget(caster, allUnits);
+               if (ft) {
+                  const mft = allUnits.find(u => u.id === ft.id);
+                  if (mft) {
+                      // Hacky way to do multi-strike in generic system: push same unit multiple times
+                      targets = [mft, mft, mft];
                   }
-              }
-              break;
-          case UnitType.BERSERKER:
-              const target = getTarget(caster, allUnits);
-              if (target) {
-                 const mutableTarget = allUnits.find(u => u.id === target.id);
-                 if (mutableTarget) {
-                     addLog('SKILL', caster.side, `${caster.name} 对 ${mutableTarget.name} 造成3连击`);
-                     applyDamage(caster, mutableTarget, 1.5, now, stateRef, addLog);
-                     applyDamage(caster, mutableTarget, 1.5, now, stateRef, addLog);
-                     applyDamage(caster, mutableTarget, 1.5, now, stateRef, addLog);
-                 }
-              }
-              break;
-          case UnitType.ASSASSIN:
-              const weakTarget = enemies.sort((a,b) => a.stats.hp - b.stats.hp)[0];
-              if (weakTarget) {
-                  addLog('SKILL', caster.side, `${caster.name} 刺杀虚弱目标 ${weakTarget.name}`);
-                  applyDamage(caster, weakTarget, 5.0, now, stateRef, addLog);
-              }
-              break;
-          case UnitType.CAPTAIN:
-              addLog('SKILL', caster.side, `${caster.name} 释放终极技能！`);
-              enemies.forEach(e => applyDamage(caster, e, 2.5, now, stateRef, addLog));
-              break;
+               }
+               break;
+          default:
+              targets = [];
       }
+
+      // 2. Apply Effects
+      targets.forEach(target => {
+          if (!target) return; // Safety
+
+          switch(skill.effectType) {
+              case SkillEffectType.DAMAGE:
+                  applyDamage(caster, target, skill.multiplier, now, stateRef, addLog);
+                  break;
+              case SkillEffectType.HEAL:
+                  applyHeal(caster, target, caster.stats.atk * skill.multiplier, now, addLog);
+                  break;
+              case SkillEffectType.SHIELD:
+                  target.stats.shield += caster.stats.atk * skill.multiplier;
+                  target.fx!.floatingText!.push({id: uuid(), text: "护盾", type: 'BLOCK', createdAt: now});
+                  break;
+              case SkillEffectType.TAUNT_AND_SHIELD:
+                  if (target.id === caster.id) {
+                      target.tauntUntil = now + (gameConfig.effects['TAUNT_DURATION_MS'] || 4000);
+                      target.stats.shield += target.stats.maxHp * skill.multiplier;
+                      target.fx!.floatingText!.push({id: uuid(), text: "嘲讽", type: 'TEXT', createdAt: now});
+                  }
+                  break;
+          }
+      });
   };
 
   const applyDamage = (
@@ -277,8 +275,7 @@ export default function App() {
   ) => {
       if (defender.isDead) return;
 
-      // Pass gameConfig to util
-      const { damage, isCrit, isBlock } = calculateDamage(attacker, defender, gameConfig, multiplier);
+      const { damage, isCrit, isBlock } = calculateDamage(attacker, defender, gameConfig.effects, multiplier);
       
       let finalDamage = damage;
       let hitShield = false;
@@ -291,7 +288,7 @@ export default function App() {
       }
 
       defender.stats.hp -= finalDamage;
-      defender.stats.rage = Math.min(gameConfig.MAX_RAGE, defender.stats.rage + 60); 
+      defender.stats.rage = Math.min(gameConfig.global.MAX_RAGE, defender.stats.rage + 60); 
       
       defender.fx!.isHit = true;
       defender.fx!.floatingText!.push({
@@ -301,20 +298,15 @@ export default function App() {
           createdAt: now
       });
 
-      // Log the hit
-      let logMsg = `${attacker.name} 攻击 ${defender.name} 造成 ${finalDamage} 伤害`;
-      if (isCrit) logMsg += ' (暴击!)';
-      if (isBlock) logMsg += ' (被格挡)';
-      if (hitShield && finalDamage === 0) logMsg = `${attacker.name} 攻击 ${defender.name} (被护盾完全吸收)`;
-      addLog('DAMAGE', attacker.side, logMsg);
+      if (isCrit) addLog('DAMAGE', attacker.side, `${attacker.name} 暴击 ${defender.name} -${finalDamage}!`);
 
       if (defender.stats.hp <= 0 && !defender.isDead) {
           defender.isDead = true;
           defender.stats.hp = 0; 
           defender.removeAt = now + 1000;
-          attacker.stats.rage = Math.min(gameConfig.MAX_RAGE, attacker.stats.rage + 300);
+          attacker.stats.rage = Math.min(gameConfig.global.MAX_RAGE, attacker.stats.rage + 300);
           
-          addLog('DEATH', defender.side, `${defender.name} 被击败了`);
+          addLog('DEATH', defender.side, `${defender.name} 倒下了`);
 
           if (defender.type === UnitType.CAPTAIN) {
               stateRef.winner = attacker.side === Side.PLAYER ? Side.PLAYER : Side.ENEMY;
@@ -334,44 +326,52 @@ export default function App() {
       target.fx!.isHealing = true;
       target.fx!.floatingText!.push({
           id: uuid(),
-          text: `${amount}`,
+          text: `${Math.floor(amount)}`,
           type: 'HEAL',
           createdAt: now
       });
-      addLog('HEAL', healer.side, `${healer.name} 治疗 ${target.name} +${amount}`);
   };
-
-  // --- Handlers ---
 
   useEffect(() => {
     if (!hasStarted) return;
     
-    // Create Units using Dynamic Config
-    const createUnit = (template: CardTemplate, side: Side, gridId: GridId): Unit => ({
+    // Config Driven Setup
+    const createUnit = (name: string, hp: number, atk: number, def: number, skillId: number, side: Side, gridId: GridId, type: UnitType): Unit => ({
         id: uuid(),
-        templateId: template.id,
-        name: template.name,
-        type: template.type,
+        templateId: type === UnitType.CAPTAIN ? 'captain' : 'unit',
+        name,
+        type,
         side,
         gridId,
-        stats: { ...template, maxHp: template.hp, rage: 0, maxRage: gameConfig.MAX_RAGE, shield: 0 },
+        skillId,
+        stats: { hp, maxHp: hp, atk, def, rage: 0, maxRage: gameConfig.global.MAX_RAGE, shield: 0 },
         nextAttackTime: 2,
         isDead: false,
         fx: { floatingText: [] }
     });
 
-    // We must merge dynamic config into the captain templates if they aren't fully in templates map
-    // (Assuming Captains are updated via gameConfig.PLAYER_CAPTAIN)
-    const dynamicPlayerCap = { ...CAPTAIN_PLAYER_TEMPLATE, hp: gameConfig.PLAYER_CAPTAIN.HP, atk: gameConfig.PLAYER_CAPTAIN.ATK, def: gameConfig.PLAYER_CAPTAIN.DEF };
-    const dynamicEnemyCap = { ...CAPTAIN_ENEMY_TEMPLATE, hp: gameConfig.ENEMY_CAPTAIN.HP, atk: gameConfig.ENEMY_CAPTAIN.ATK, def: gameConfig.ENEMY_CAPTAIN.DEF };
+    const pCapConf = gameConfig.captains[0];
+    const eCapConf = gameConfig.captains[1];
 
-    const playerCap = createUnit(dynamicPlayerCap, Side.PLAYER, 8);
-    const enemyCap = createUnit(dynamicEnemyCap, Side.ENEMY, 8);
-    const enemyTank = createUnit(cardTemplates['unit_tank'], Side.ENEMY, 2);
-    const enemyArcher = createUnit(cardTemplates['unit_archer'], Side.ENEMY, 4);
+    const playerCap = createUnit(pCapConf.name, pCapConf.hp, pCapConf.atk, pCapConf.def, pCapConf.skillId, Side.PLAYER, 8, UnitType.CAPTAIN);
+    const enemyCap = createUnit(eCapConf.name, eCapConf.hp, eCapConf.atk, eCapConf.def, eCapConf.skillId, Side.ENEMY, 8, UnitType.CAPTAIN);
+    
+    // Hardcoded initial enemies for demo, reading from templates if available
+    const tTank = cardTemplates['101'] || Object.values(cardTemplates)[0];
+    const tArcher = cardTemplates['105'] || Object.values(cardTemplates)[1];
+    
+    // Helper to spawn from template
+    const spawnFromTemplate = (tid: string, grid: GridId) => {
+        const t = cardTemplates[tid];
+        if(!t) return createUnit('Enemy', 1000, 100, 10, 0, Side.ENEMY, grid, UnitType.TANK); // Fallback
+        return createUnit(t.name, t.hp, t.atk, t.def, t.skillId, Side.ENEMY, grid, t.type);
+    };
+
+    const enemyTank = spawnFromTemplate('101', 2);
+    const enemyArcher = spawnFromTemplate('105', 4);
 
     setGameState(prev => ({
-      ...getInitialState(), // Reset basic state
+      ...getInitialState(),
       units: [playerCap, enemyCap, enemyTank, enemyArcher],
       hand: INITIAL_DECK.slice(0, 4).map(tid => ({ instanceId: uuid(), templateId: tid, isCoolingDown: false })),
       deck: INITIAL_DECK.slice(4),
@@ -382,7 +382,7 @@ export default function App() {
     animationFrameRef.current = requestAnimationFrame(gameTick);
 
     return () => cancelAnimationFrame(animationFrameRef.current);
-  }, [hasStarted, gameTick, gameConfig, cardTemplates]); // Re-start if config changes while not playing? Or just when hitting start.
+  }, [hasStarted, gameTick, gameConfig, cardTemplates, skillsConfig]);
 
   const handleDragStart = (cardId: string, templateId: string) => {
     if (gameState.winner || gameState.isPaused) return;
@@ -394,14 +394,13 @@ export default function App() {
     const { cardId, templateId } = dragRef.current;
     if (!cardId || !templateId) return;
     
-    // Use dynamic template
     const template = cardTemplates[templateId];
     if (!template) return;
 
     if (gameState.energy < template.cost) { cancelDrag(); return; }
 
-    let initialShield = 0;
-    if (template.type === UnitType.TANK) initialShield = template.hp * 0.3;
+    let initialShield = 0; // Could move to config
+    if (template.type === UnitType.TANK) initialShield = template.hp * (gameConfig.effects['SHIELD_ABSORB_RATIO'] || 0.3);
 
     const newUnit: Unit = {
       id: uuid(),
@@ -410,7 +409,8 @@ export default function App() {
       type: template.type,
       side: Side.PLAYER,
       gridId,
-      stats: { ...template, maxHp: template.hp, rage: gameConfig.MAX_RAGE, maxRage: gameConfig.MAX_RAGE, shield: initialShield },
+      skillId: template.skillId,
+      stats: { ...template, maxHp: template.hp, rage: gameConfig.global.MAX_RAGE, maxRage: gameConfig.global.MAX_RAGE, shield: initialShield },
       nextAttackTime: 0.1, 
       isDead: false,
       fx: { floatingText: [] }
@@ -463,8 +463,9 @@ export default function App() {
           const activeUnits = prev.units.map(u => ({...u, stats: {...u.stats}, fx: {...u.fx, floatingText: [...(u.fx?.floatingText||[])]} }));
           
           const playerCap = activeUnits.find(u => u.type === UnitType.CAPTAIN && u.side === Side.PLAYER);
+          const maxRage = gameConfig.global.MAX_RAGE;
           
-          if (playerCap && playerCap.stats.rage >= gameConfig.MAX_RAGE) {
+          if (playerCap && playerCap.stats.rage >= maxRage) {
               playerCap.stats.rage = 0;
               playerCap.fx!.isSkill = true;
               
@@ -521,10 +522,9 @@ export default function App() {
                     onCaptainSkill={() => {}} 
                     onUpdateConfig={handleConfigUpdate}
                     currentConfig={gameConfig}
+                    currentTemplates={cardTemplates}
+                    currentSkills={skillsConfig}
                  /> 
-                 {/* Re-using HUD's config panel here is messy visually, let's just use the component directly if possible, or accept the slight UI weirdness of full HUD. Actually App.tsx renders HUD later, let's just create a wrapper for ConfigPanel here or rely on the main HUD once game starts. 
-                 Wait, user needs to config BEFORE game starts usually. 
-                 Let's add the ConfigPanel component logic here directly.*/}
              </div>
           </div>
         </div>
@@ -551,6 +551,8 @@ export default function App() {
         onCaptainSkill={handleCaptainSkill}
         onUpdateConfig={handleConfigUpdate}
         currentConfig={gameConfig}
+        currentTemplates={cardTemplates}
+        currentSkills={skillsConfig}
       />
 
       <CombatLog 
@@ -579,7 +581,7 @@ export default function App() {
       />
 
       <div className="relative z-30 mt-auto w-full pb-4">
-         <EnergyBar current={gameState.energy} />
+         <EnergyBar current={gameState.energy} max={gameState.maxEnergy} />
          <Hand 
              hand={gameState.hand} 
              currentEnergy={gameState.energy} 
@@ -603,10 +605,9 @@ export default function App() {
                   <span className="text-gray-500">ATK</span> <span className="font-mono font-bold text-red-400">{cardTemplates[dragRef.current.templateId].atk}</span>
                 </div>
              </div>
-             <p className="italic text-gray-400 leading-relaxed border-l-2 border-gray-600 pl-3">{cardTemplates[dragRef.current.templateId].description}</p>
              <div className="mt-4 pt-3 border-t border-gray-700 bg-gradient-to-r from-blue-900/20 to-transparent p-2 rounded">
                <p className="text-blue-300 font-bold mb-1">技能</p>
-               <p className="text-xs text-blue-100">{cardTemplates[dragRef.current.templateId].skillDescription}</p>
+               <p className="text-xs text-blue-100">{skillsConfig[cardTemplates[dragRef.current.templateId].skillId]?.description || '无技能'}</p>
              </div>
           </div>
         </div>
