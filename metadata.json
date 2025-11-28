@@ -1,0 +1,5 @@
+{
+  "name": "Card Battle Demo",
+  "description": "A real-time card drag & drop battle game with energy management and 3x3 grid combat.",
+  "requestFramePermissions": []
+}

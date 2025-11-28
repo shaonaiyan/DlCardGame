@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Card Battle Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Disable text selection for game feel */
+      body {
+        user-select: none;
+        -webkit-user-select: none;
+        background-color: #050505;
+        overflow: hidden; /* Prevent scrolling during drag */
+      }
+      
+      @keyframes floatUp {
+        0% { transform: translate(-50%, 0) scale(0.5); opacity: 0; }
+        20% { transform: translate(-50%, -20px) scale(1.2); opacity: 1; }
+        100% { transform: translate(-50%, -60px) scale(1); opacity: 0; }
+      }
+      
+      @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-4px) rotate(-2deg); }
+        75% { transform: translateX(4px) rotate(2deg); }
+      }
+
+      @keyframes lunge-right {
+        0% { transform: translateX(0); }
+        30% { transform: translateX(30px) scale(1.1); }
+        100% { transform: translateX(0); }
+      }
+
+      @keyframes lunge-left {
+        0% { transform: translateX(0); }
+        30% { transform: translateX(-30px) scale(1.1); }
+        100% { transform: translateX(0); }
+      }
+      
+      @keyframes skill-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7); transform: scale(1); }
+        50% { transform: scale(1.1); }
+        70% { box-shadow: 0 0 0 20px rgba(255, 255, 255, 0); }
+        100% { transform: scale(1); }
+      }
+
+      .animate-floatUp { animation: floatUp 1s ease-out forwards; }
+      .animate-shake { animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both; }
+      .animate-lunge-right { animation: lunge-right 0.3s ease-out; }
+      .animate-lunge-left { animation: lunge-left 0.3s ease-out; }
+      .animate-skill { animation: skill-pulse 0.6s ease-out; }
+      
+      .text-shadow-sm { text-shadow: 1px 1px 0 rgba(0,0,0,0.5); }
+      .text-shadow-md { text-shadow: 2px 2px 0 rgba(0,0,0,0.8); }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
